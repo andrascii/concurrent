@@ -5,12 +5,24 @@ namespace concurrent
 	namespace mutualexclusion
 	{
 		template <typename T>
-		class stack
+		class Stack
 		{
 		public:
 			void push(const T& data)
 			{
 				std::lock_guard<std::mutex> lock(_mutex);
+				_stack.push(data);
+			}
+
+			void pushIfSizeLessThan(const T& data, size_t sz)
+			{
+				std::lock_guard<std::mutex> lock(_mutex);
+
+				if (size() >= sz)
+				{
+					return;
+				}
+
 				_stack.push(data);
 			}
 

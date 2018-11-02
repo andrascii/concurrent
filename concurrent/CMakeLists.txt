@@ -53,6 +53,7 @@ endif()
 
 include_directories(
 	${ConcurrentIncludeDirectory}
+	${BOOST_LOCKFREE_DIR}
 	${Boost_INCLUDE_DIRS}
 	${CMAKE_CURRENT_BINARY_DIR}
 )

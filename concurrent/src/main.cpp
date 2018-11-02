@@ -19,14 +19,17 @@ struct TestData
 	int a10;
 };
 
-template <typename T>
-void func(T& stack)
+template <typename T, typename Data>
+void func(T& stack, const Data& data = Data())
 {
-	while (!startSignal.load(std::memory_order_acquire));
+	while (!startSignal.load(std::memory_order_acquire))
+	{
+		std::this_thread::yield();
+	}
 
 	while (stack.size() < c_iterationsCount)
 	{
-		stack.push(TestData());
+		stack.pushIfSizeLessThan(data, c_iterationsCount);
 	}
 
 	startSignal.store(false, std::memory_order_release);
@@ -34,14 +37,14 @@ void func(T& stack)
 
 int main(int, char)
 {
-	concurrent::lockfree::stack<TestData> lockFreeStack;
-	concurrent::mutualexclusion::stack<TestData> mutualExclutionStack;
+	concurrent::lockfree::Stack<std::string> lockFreeStack;
+	concurrent::mutualexclusion::Stack<std::string> mutualExclutionStack;
 
 	std::vector<std::thread> threads;
 
 	for (int i = 0; i < std::thread::hardware_concurrency(); ++i)
 	{
-		threads.emplace_back(std::thread([&]() { func(lockFreeStack); }));
+		threads.emplace_back(std::thread([&]() { func(lockFreeStack, std::string("zalupazalupazalupazalupazalupazalupazalupazalupazalupazalupazalupa")); }));
 	}
 
 	auto start = std::chrono::high_resolution_clock::now();
@@ -62,7 +65,7 @@ int main(int, char)
 
 	for (int i = 0; i < std::thread::hardware_concurrency(); ++i)
 	{
-		threads.emplace_back(std::thread([&]() { func(mutualExclutionStack); }));
+		threads.emplace_back(std::thread([&]() { func(mutualExclutionStack, std::string("zalupazalupazalupazalupazalupazalupazalupazalupazalupazalupazalupa")); }));
 	}
 
 	start = std::chrono::high_resolution_clock::now();

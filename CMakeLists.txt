@@ -49,7 +49,7 @@ set(CMAKE_INSTALL_PREFIX)
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
 set(Boost_USE_STATIC_LIBS ON)
-find_package(Boost REQUIRED system date_time program_options filesystem COMPONENTS)
+find_package(Boost REQUIRED system date_time program_options thread filesystem COMPONENTS)
 
 MACRO(add_msvc_precompiled_header PrecompiledHeader PrecompiledSource SourcesVar)
   IF(MSVC)
