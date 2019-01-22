@@ -10,7 +10,7 @@ namespace concurrent
 		private:
 			struct Node;
 
-			struct CountedRefs
+			struct CountedReference
 			{
 				int externalCounter;
 				Node* pointer;
@@ -18,15 +18,15 @@ namespace concurrent
 
 			struct Node
 			{
-				Node(const T& data)
+				Node(const std::shared_ptr<T>& data)
 					: data(data)
 					, next(nullptr)
 					, internalCounter(0)
 				{
 				}
 
-				T data;
-				CountedRefs next;
+				std::shared_ptr<T> data;
+				CountedReference next;
 				std::atomic<int> internalCounter;
 			};
 
@@ -42,34 +42,44 @@ namespace concurrent
 
 			void push(const T& data)
 			{
-				std::unique_ptr<Node> node = std::make_unique<Node>(data);
+				std::unique_ptr<Node> node = std::make_unique<Node>(std::make_shared<T>(data));
 				node->next = m_head.load();
 
-				CountedRefs newCountedPointer;
+				CountedReference newCountedPointer;
 				newCountedPointer.externalCounter = 1;
 				newCountedPointer.pointer = node.get();
 
 				while (!m_head.compare_exchange_weak(node->next, newCountedPointer));
+
+				node.release();
 			}
 
 			std::shared_ptr<T> pop()
 			{
-				CountedRefs oldHead = m_head.load();
+				CountedReference oldHead = m_head.load();
 
 				for (;;)
 				{
 					increaseHeadExternalCounter(oldHead);
 
-					while (!m_head.compare_exchange_weak(oldHead, oldHead.pointer->next));
+					while (m_head.compare_exchange_strong(oldHead, oldHead.pointer->next));
+					{
+						std::shared_ptr<T> result;
+						result.swap(oldHead.pointer->data);
+
+						freeNode(oldHead);
+
+						return result;
+					}
 
 					oldHead.pointer->internalCounter.fetch_sub(1);
 				}
 			}
 
 		private:
-			void increaseHeadExternalCounter(CountedRefs& oldHead)
+			void increaseHeadExternalCounter(CountedReference& oldHead)
 			{
-				CountedRefs increasedCounterNode;
+				CountedReference increasedCounterNode;
 
 				do
 				{
@@ -81,13 +91,13 @@ namespace concurrent
 				oldHead = increasedCounterNode;
 			}
 
-			void freeNode(CountedRefs& node)
+			void freeNode(CountedReference& node)
 			{
 				//node.pointer->internalCounter.fetch_sub(1);
 			}
 
 		private:
-			std::atomic<CountedRefs> m_head;
+			std::atomic<CountedReference> m_head;
 		};
 	}
 }
