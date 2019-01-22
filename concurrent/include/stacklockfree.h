@@ -8,171 +8,86 @@ namespace concurrent
 		class Stack final
 		{
 		private:
-			struct node
+			struct Node;
+
+			struct CountedRefs
 			{
-				T data;
-				node* next;
-
-				node(const T& data)
-					: data(data)
-				{
-				}
-
-				node(T&& data)
-					: data(std::move(data))
-				{
-				}
+				int externalCounter;
+				Node* pointer;
 			};
 
-			static std::thread::id _currentDestroyThreadId;
+			struct Node
+			{
+				Node(const T& data)
+					: data(data)
+					, next(nullptr)
+					, internalCounter(0)
+				{
+				}
+
+				T data;
+				CountedRefs next;
+				std::atomic<int> internalCounter;
+			};
 
 		public:
 			Stack()
-				: _head(nullptr)
-				, _forPendingDelete(nullptr)
-				, _size(0)
-				, _threadsInPop(0)
 			{
+				// set start value of m_head
 			}
 
 			~Stack()
 			{
-				deleteNodesChain(_head.load(std::memory_order_relaxed));
 			}
 
 			void push(const T& data)
 			{
-				node* newNode = new node(data);
-				pushElementHelper(newNode);
+				std::unique_ptr<Node> node = std::make_unique<Node>(data);
+				node->next = m_head.load();
 
-				_size.fetch_add(1, std::memory_order_relaxed);
-			}
-			void push(T&& data)
-			{
-				node* newNode = new node(std::move(data));
-				pushElementHelper(newNode);
+				CountedRefs newCountedPointer;
+				newCountedPointer.externalCounter = 1;
+				newCountedPointer.pointer = node.get();
 
-				_size.fetch_add(1, std::memory_order_relaxed);
-			}
-
-			void pushIfSizeLessThan(const T& data, size_t size)
-			{
-				try
-				{
-					if (_size.fetch_add(1, std::memory_order_relaxed) >= size)
-					{
-						_size.fetch_sub(1, std::memory_order_relaxed);
-						return;
-					}
-
-					node* newNode = new node(data);
-					pushElementHelper(newNode);
-				}
-				catch (...)
-				{
-					_size.fetch_sub(1, std::memory_order_relaxed);
-				}
-			}
-			void pushIfSizeLessThan(T&& data, size_t size)
-			{
-				try
-				{
-					if (_size.fetch_add(1, std::memory_order_relaxed) >= size)
-					{
-						_size.fetch_sub(1, std::memory_order_relaxed);
-						return;
-					}
-
-					node* newNode = new node(std::move(data));
-					pushElementHelper(newNode);
-				}
-				catch (...)
-				{
-					_size.fetch_sub(1, std::memory_order_relaxed);
-				}
+				while (!m_head.compare_exchange_weak(node->next, newCountedPointer));
 			}
 
 			std::shared_ptr<T> pop()
 			{
-				_threadsInPop.fetch_add(1, std::memory_order_relaxed);
+				CountedRefs oldHead = m_head.load();
 
-				node* oldHead = _head.load();
-				while (oldHead && _head.compare_exchange_weak(oldHead, oldHead->next));
-
-				std::shared_ptr<T> result;
-
-				if (oldHead)
+				for (;;)
 				{
-					result = std::make_shared<T>(oldHead->data);
-					_size.fetch_sub(1, std::memory_order_relaxed);
+					increaseHeadExternalCounter(oldHead);
 
-					tryDeleteNode(oldHead);
+					while (!m_head.compare_exchange_weak(oldHead, oldHead.pointer->next));
+
+					oldHead.pointer->internalCounter.fetch_sub(1);
 				}
-
-				return result;
-			}
-
-			unsigned size() const
-			{
-				return _size.load(std::memory_order_relaxed);
 			}
 
 		private:
-			void pushElementHelper(node* newNode) noexcept
+			void increaseHeadExternalCounter(CountedRefs& oldHead)
 			{
-				newNode->next = _head.load();
-				while (_head.compare_exchange_weak(newNode->next, newNode));
+				CountedRefs increasedCounterNode;
+
+				do
+				{
+					increasedCounterNode = oldHead;
+					++increasedCounterNode.externalCounter;
+				}
+				while (!m_head.compare_exchange_weak(oldHead, increasedCounterNode));
+
+				oldHead = increasedCounterNode;
 			}
 
-			void deleteNodesChain(node* chain)
+			void freeNode(CountedRefs& node)
 			{
-				if (_currentDestroyThreadId != std::thread::id() &&
-					_currentDestroyThreadId != std::this_thread::get_id())
-				{
-					assert(!"This function cannot be run from different threads simultaneously");
-				}
-
-				_currentDestroyThreadId = std::this_thread::get_id();
-
-				node* element = chain;
-
-				while (element)
-				{
-					node* nextElement = element->next;
-
-					delete element;
-
-					element = nextElement;
-				}
-
-				_currentDestroyThreadId = std::thread::id();
-			}
-
-			void tryDeleteNode(node* toDelete)
-			{
-				if (_threadsInPop == 1)
-				{
-					node* forPendingDelete = _forPendingDelete.exchange(nullptr, std::memory_order_relaxed);
-				}
-				else
-				{
-
-				}
-			}
-
-			void addNodesToPendingDeletion(node* toDelete)
-			{
-
+				//node.pointer->internalCounter.fetch_sub(1);
 			}
 
 		private:
-			std::atomic<node*> _head;
-			std::atomic<node*> _forPendingDelete;
-			std::atomic<unsigned> _size;
-			std::atomic<unsigned> _threadsInPop;
+			std::atomic<CountedRefs> m_head;
 		};
-
-		template <typename T>
-		std::thread::id Stack<T>::_currentDestroyThreadId;
 	}
 }
