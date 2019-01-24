@@ -18,8 +18,8 @@ namespace concurrent
 
 			struct Node
 			{
-				Node(const std::shared_ptr<T>& data)
-					: data(data)
+				Node(const T& data)
+					: data(std::make_shared<T>(data))
 					, next(nullptr)
 					, internalCounter(0)
 				{
@@ -31,48 +31,57 @@ namespace concurrent
 			};
 
 		public:
-			Stack()
-			{
-				// set start value of m_head
-			}
-
 			~Stack()
 			{
+				while (pop());
 			}
 
 			void push(const T& data)
 			{
-				std::unique_ptr<Node> node = std::make_unique<Node>(std::make_shared<T>(data));
-				node->next = m_head.load();
-
 				CountedReference newCountedPointer;
 				newCountedPointer.externalCounter = 1;
-				newCountedPointer.pointer = node.get();
-
-				while (!m_head.compare_exchange_weak(node->next, newCountedPointer));
-
-				node.release();
+				newCountedPointer.pointer = new Node(data);
+				newCountedPointer.pointer->next = std::atomic_load(&m_head, std::memory_order_relaxed);
+				while (!m_head.compare_exchange_weak(newCountedPointer.pointer->next, newCountedPointer, std::memory_order_release, std::memory_order_relaxed));
 			}
 
 			std::shared_ptr<T> pop()
 			{
-				CountedReference oldHead = m_head.load();
+				CountedReference oldHead = std::atomic_load(&m_head, std::memory_order_relaxed);
 
 				for (;;)
 				{
 					increaseHeadExternalCounter(oldHead);
 
-					while (m_head.compare_exchange_strong(oldHead, oldHead.pointer->next));
+					// because in case of CAS failure oldHead will be changed
+					// but we need to decrement internal counter for this node
+					// because we already incremented external counter for it
+					Node* oldPointer = oldHead.pointer;
+
+					if (oldHead.pointer == nullptr)
+					{
+						return std::shared_ptr<T>();
+					}
+
+					if (m_head.compare_exchange_strong(oldHead, oldHead.pointer->next, std::memory_order_relaxed, std::memory_order_relaxed));
 					{
 						std::shared_ptr<T> result;
 						result.swap(oldHead.pointer->data);
 
-						freeNode(oldHead);
+						const int decrementValue = oldHead.externalCounter - 2;
+
+						if (std::atomic_fetch_add(&oldPointer->internalCounter, decrementValue, std::memory_order_release) == -decrementValue)
+						{
+							delete oldHead.pointer;
+						}
 
 						return result;
 					}
-
-					oldHead.pointer->internalCounter.fetch_sub(1);
+					else if (std::atomic_fetch_add(&oldPointer->internalCounter, -1, std::memory_order_relaxed) == 1)
+					{
+						std::atomic_load(&oldPointer->internalCounter, std::memory_order_acquire);
+						delete oldHead.pointer;
+					}
 				}
 			}
 
@@ -86,14 +95,9 @@ namespace concurrent
 					increasedCounterNode = oldHead;
 					++increasedCounterNode.externalCounter;
 				}
-				while (!m_head.compare_exchange_weak(oldHead, increasedCounterNode));
+				while (!m_head.compare_exchange_strong(oldHead, increasedCounterNode, std::memory_order_acquire, std::memory_order_relaxed));
 
 				oldHead = increasedCounterNode;
-			}
-
-			void freeNode(CountedReference& node)
-			{
-				//node.pointer->internalCounter.fetch_sub(1);
 			}
 
 		private:
