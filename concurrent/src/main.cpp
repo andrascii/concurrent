@@ -1,7 +1,7 @@
 #include "stacklockfree.h"
 #include "stackmutualexclusion.h"
 
-constexpr int c_iterationsCount = 30000000;
+constexpr int c_iterationsCount = 1000000;
 
 std::atomic_bool startSignal(false);
 
@@ -27,9 +27,9 @@ void func(T& stack, const Data& data = Data())
 		std::this_thread::yield();
 	}
 
-	while (stack.size() < c_iterationsCount)
+	for (int i = 0; i < c_iterationsCount; ++i)
 	{
-		stack.pushIfSizeLessThan(data, c_iterationsCount);
+		stack.push(data);
 	}
 
 	startSignal.store(false, std::memory_order_release);
@@ -42,9 +42,9 @@ int main(int, char)
 
 	std::vector<std::thread> threads;
 
-	for (int i = 0; i < std::thread::hardware_concurrency(); ++i)
+	for (unsigned i = 0; i < std::thread::hardware_concurrency() * 2; ++i)
 	{
-		threads.emplace_back(std::thread([&]() { func(lockFreeStack, std::string("zalupazalupazalupazalupazalupazalupazalupazalupazalupazalupazalupa")); }));
+		threads.emplace_back(std::thread([&]() { func(lockFreeStack, std::string(200, 'a')); }));
 	}
 
 	auto start = std::chrono::high_resolution_clock::now();
@@ -63,9 +63,9 @@ int main(int, char)
 
 	threads.clear();
 
-	for (int i = 0; i < std::thread::hardware_concurrency(); ++i)
+	for (unsigned i = 0; i < std::thread::hardware_concurrency() * 2; ++i)
 	{
-		threads.emplace_back(std::thread([&]() { func(mutualExclutionStack, std::string("zalupazalupazalupazalupazalupazalupazalupazalupazalupazalupazalupa")); }));
+		threads.emplace_back(std::thread([&]() { func(mutualExclutionStack, std::string(200, 'a')); }));
 	}
 
 	start = std::chrono::high_resolution_clock::now();
