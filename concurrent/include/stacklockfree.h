@@ -52,13 +52,13 @@ public:
 		CountedReference newCountedPointer;
 		newCountedPointer.externalCounter = 1;
 		newCountedPointer.pointer = new Node(std::move(data));
-		newCountedPointer.pointer->next = std::atomic_load_explicit(&m_head, std::memory_order_relaxed);
+		newCountedPointer.pointer->next = m_head.load(std::memory_order_relaxed);
 		while (!m_head.compare_exchange_weak(newCountedPointer.pointer->next, newCountedPointer, std::memory_order_release, std::memory_order_relaxed));
 	}
 
 	std::shared_ptr<T> pop()
 	{
-		CountedReference oldHead = std::atomic_load_explicit(&m_head, std::memory_order_relaxed);
+		CountedReference oldHead = m_head.load(std::memory_order_relaxed);
 
 		for (;;)
 		{
@@ -81,16 +81,16 @@ public:
 
 				const int decrementValue = oldHead.externalCounter - 2;
 
-				if (std::atomic_fetch_add_explicit(&oldPointer->internalCounter, decrementValue, std::memory_order_release) == -decrementValue)
+				if (oldPointer->internalCounter.fetch_add(decrementValue, std::memory_order_release) == -decrementValue)
 				{
 					delete oldHead.pointer;
 				}
 
 				return result;
 			}
-			else if (std::atomic_fetch_add_explicit(&oldPointer->internalCounter, -1, std::memory_order_relaxed) == 1)
+			else if (oldPointer->internalCounter.fetch_add(-1, std::memory_order_relaxed) == 1)
 			{
-				std::atomic_load_explicit(&oldPointer->internalCounter, std::memory_order_acquire);
+				(void)oldPointer->internalCounter.load(std::memory_order_acquire);
 				delete oldHead.pointer;
 			}
 		}
@@ -106,7 +106,7 @@ private:
 			increasedCounterNode = oldHead;
 			++increasedCounterNode.externalCounter;
 		}
-		while (!m_head.compare_exchange_strong(oldHead, increasedCounterNode, std::memory_order_acquire, std::memory_order_relaxed));
+		while (!m_head.compare_exchange_strong(oldHead, increasedCounterNode, std::memory_order_acquire, std::memory_order_relaxed)); // why strong but not weak?
 
 		oldHead = increasedCounterNode;
 	}

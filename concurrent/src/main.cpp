@@ -35,7 +35,7 @@ void func(T& stack, const Data& data = Data())
 	startSignal.store(false, std::memory_order_release);
 }
 
-int main(int, char)
+void speedTest1()
 {
 	concurrent::lockfree::Stack<std::string> lockFreeStack;
 	concurrent::mutualexclusion::Stack<std::string> mutualExclutionStack;
@@ -79,6 +79,73 @@ int main(int, char)
 	end = std::chrono::high_resolution_clock::now();
 
 	std::cout << "mutual exclusion stack result:" << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+}
 
-	std::cin.get();
+union Type
+{
+	int* pointer;
+	short counter;
+};
+
+struct LockFreeType
+{
+	short counter : 16;
+	unsigned long long pointer : 48;
+};
+
+class CountedReference final
+{
+public:
+	CountedReference()
+		: m_pointer(nullptr)
+	{
+	}
+
+	void set(unsigned long long counter, void* p)
+	{
+		unsigned long long value = reinterpret_cast<unsigned long long>(p);
+		value |= counter << 48;
+
+		m_pointer.store(reinterpret_cast<void*>(value));
+	}
+
+	void incrementCounter()
+	{
+		unsigned long long value = reinterpret_cast<unsigned long long>(m_pointer.load());
+		const int newCounterValue = (value >> 48) + 1;
+
+	}
+
+	short counter() const
+	{
+		unsigned long long value = reinterpret_cast<unsigned long long>(m_pointer.load());
+		return value >> 48;
+	}
+
+	void* pointer() const
+	{
+		unsigned long long value = reinterpret_cast<unsigned long long>(m_pointer.load());
+		void* result = reinterpret_cast<void*>(value & 0x0000FFFFFFFFFFFF);
+		return result;
+	}
+
+private:
+	std::atomic<void*> m_pointer;
+};
+
+int main(int, char)
+{
+	CountedReference ref;
+	ref.set(124, new int(100500));
+
+	std::cout << "counter: " << ref.counter() << std::endl;
+	std::cout << "value: " << *(int*)ref.pointer() << std::endl;
+
+	std::cout << sizeof(LockFreeType) << std::endl;
+
+	Type t;
+	t.counter = 1;
+	t.pointer = new int();
+
+	std::cout << sizeof(Type) << std::endl;
 }
